@@ -1004,381 +1004,114 @@ describe(Support.getTestDialectTeaser('Model'), () => {
     }
 
     SAFE_OPTION_VALUES.forEach(safe => {
-      it('should map the correct fields when updating instance (#10589)', async function () {
-        const User = this.sequelize.define('User', {
-          id3: {
-            field: 'id',
-            type: DataTypes.INTEGER,
-            primaryKey: true,
-          },
-          id: {
-            field: 'id2',
-            type: DataTypes.INTEGER,
-            allowNull: false,
-          },
-          id2: {
-            field: 'id3',
-            type: DataTypes.INTEGER,
-            allowNull: false,
-          },
+      describe(`when options.safe=${safe}`, () => {
+        it('should map the correct fields when updating instance (#10589)', async function () {
+          const User = this.sequelize.define('User', {
+            id3: {
+              field: 'id',
+              type: DataTypes.INTEGER,
+              primaryKey: true,
+            },
+            id: {
+              field: 'id2',
+              type: DataTypes.INTEGER,
+              allowNull: false,
+            },
+            id2: {
+              field: 'id3',
+              type: DataTypes.INTEGER,
+              allowNull: false,
+            },
+          });
+
+          await this.sequelize.sync({ force: true });
+          await User.create({ id3: 94, id: 87, id2: 943 });
+          const user = await User.findByPk(94);
+          await user.update({ id2: 8877 }, { safe });
+          expect((await User.findByPk(94)).id2).to.equal(8877);
         });
 
-        await this.sequelize.sync({ force: true });
-        await User.create({ id3: 94, id: 87, id2: 943 });
-        const user = await User.findByPk(94);
-        await user.update({ id2: 8877 }, { safe });
-        expect((await User.findByPk(94)).id2).to.equal(8877);
-      });
+        if (current.dialect.supports.transactions) {
+          it('supports transactions', async function () {
+            const sequelize = await Support.prepareTransactionTest(this.sequelize);
+            const User = sequelize.define('User', { username: DataTypes.STRING });
 
-      if (current.dialect.supports.transactions) {
-        it('supports transactions', async function () {
-          const sequelize = await Support.prepareTransactionTest(this.sequelize);
-          const User = sequelize.define('User', { username: DataTypes.STRING });
+            await User.sync({ force: true });
+            await User.create({ username: 'foo' });
 
+            const t = await sequelize.transaction();
+            await User.update({ username: 'bar' }, {
+              where: { username: 'foo' },
+              transaction: t,
+              safe,
+            });
+            const users1 = await User.findAll();
+            const users2 = await User.findAll({ transaction: t });
+            expect(users1[0].username).to.equal('foo');
+            expect(users2[0].username).to.equal('bar');
+            await t.rollback();
+          });
+        }
+
+        it('updates the attributes that we select only without updating createdAt', async function () {
+          const User = this.sequelize.define('User1', {
+            username: DataTypes.STRING,
+            secretValue: DataTypes.STRING,
+          }, {
+            paranoid: true,
+            tableName: 'users1',
+          });
+
+          let test = false;
           await User.sync({ force: true });
-          await User.create({ username: 'foo' });
+          const user = await User.create({ username: 'Peter', secretValue: '42' });
+          await user.update({ secretValue: '43' }, {
+            fields: ['secretValue'],
+            logging(sql) {
+              test = true;
 
-          const t = await sequelize.transaction();
-          await User.update({ username: 'bar' }, {
-            where: { username: 'foo' },
-            transaction: t,
+              expect(sql).to.match(/^Executing \(default\): /);
+              sql = sql.slice(21);
+
+              expectsql(sql, {
+                default: `UPDATE [users1] SET [secretValue]=$sequelize_1,[updatedAt]=$sequelize_2 WHERE [id] = $sequelize_3`,
+                postgres: `UPDATE "users1" SET "secretValue"=$1,"updatedAt"=$2 WHERE "id" = $3 RETURNING *`,
+                mysql: 'UPDATE `users1` SET `secretValue`=?,`updatedAt`=? WHERE `id` = ?',
+                mariadb: 'UPDATE `users1` SET `secretValue`=?,`updatedAt`=? WHERE `id` = ?',
+                mssql: `UPDATE [users1] SET [secretValue]=@sequelize_1,[updatedAt]=@sequelize_2 OUTPUT INSERTED.* WHERE [id] = @sequelize_3`,
+                db2: `SELECT * FROM FINAL TABLE (UPDATE "users1" SET "secretValue"=?,"updatedAt"=? WHERE "id" = ?);`,
+                ibmi: `UPDATE "users1" SET "secretValue"=?,"updatedAt"=? WHERE "id" = ?;`,
+              });
+            },
+            returning: ['*'],
             safe,
           });
-          const users1 = await User.findAll();
-          const users2 = await User.findAll({ transaction: t });
-          expect(users1[0].username).to.equal('foo');
-          expect(users2[0].username).to.equal('bar');
-          await t.rollback();
-        });
-      }
-
-      it('updates the attributes that we select only without updating createdAt', async function () {
-        const User = this.sequelize.define('User1', {
-          username: DataTypes.STRING,
-          secretValue: DataTypes.STRING,
-        }, {
-          paranoid: true,
-          tableName: 'users1',
+          expect(test).to.be.true;
         });
 
-        let test = false;
-        await User.sync({ force: true });
-        const user = await User.create({ username: 'Peter', secretValue: '42' });
-        await user.update({ secretValue: '43' }, {
-          fields: ['secretValue'],
-          logging(sql) {
-            test = true;
-
-            expect(sql).to.match(/^Executing \(default\): /);
-            sql = sql.slice(21);
-
-            expectsql(sql, {
-              default: `UPDATE [users1] SET [secretValue]=$sequelize_1,[updatedAt]=$sequelize_2 WHERE [id] = $sequelize_3`,
-              postgres: `UPDATE "users1" SET "secretValue"=$1,"updatedAt"=$2 WHERE "id" = $3 RETURNING *`,
-              mysql: 'UPDATE `users1` SET `secretValue`=?,`updatedAt`=? WHERE `id` = ?',
-              mariadb: 'UPDATE `users1` SET `secretValue`=?,`updatedAt`=? WHERE `id` = ?',
-              mssql: `UPDATE [users1] SET [secretValue]=@sequelize_1,[updatedAt]=@sequelize_2 OUTPUT INSERTED.* WHERE [id] = @sequelize_3`,
-              db2: `SELECT * FROM FINAL TABLE (UPDATE "users1" SET "secretValue"=?,"updatedAt"=? WHERE "id" = ?);`,
-              ibmi: `UPDATE "users1" SET "secretValue"=?,"updatedAt"=? WHERE "id" = ?;`,
-            });
-          },
-          returning: ['*'],
-          safe,
-        });
-        expect(test).to.be.true;
-      });
-
-      it('allows sql logging of updated statements', async function () {
-        const User = this.sequelize.define('User', {
-          name: DataTypes.STRING,
-          bio: DataTypes.TEXT,
-        }, {
-          paranoid: true,
-        });
-        let test = false;
-        await User.sync({ force: true });
-        const u = await User.create({ name: 'meg', bio: 'none' });
-        expect(u).to.exist;
-        await u.update({ name: 'brian' }, {
-          logging(sql) {
-            test = true;
-            expect(sql).to.exist;
-            expect(sql.toUpperCase()).to.include('UPDATE');
-          },
-          safe,
-        });
-        expect(test).to.be.true;
-      });
-
-      it('updates only values that match filter', async function () {
-        const data = [
-          { username: 'Peter', secretValue: '42' },
-          { username: 'Paul', secretValue: '42' },
-          { username: 'Bob', secretValue: '43' },
-        ];
-
-        await this.User.bulkCreate(data);
-        await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
-        const users = await this.User.findAll({ order: ['id'] });
-        expect(users).to.have.lengthOf(3);
-
-        for (const user of users) {
-          if (user.secretValue === '42') {
-            expect(user.username).to.equal('Bill');
-          } else {
-            expect(user.username).to.equal('Bob');
-          }
-        }
-      });
-
-      it('updates only values that match the allowed fields', async function () {
-        const data = [{ username: 'Peter', secretValue: '42' }];
-
-        await this.User.bulkCreate(data);
-        await this.User.update({ username: 'Bill', secretValue: '43' }, { where: { secretValue: '42' }, fields: ['username'], safe });
-        const users = await this.User.findAll({ order: ['id'] });
-        expect(users).to.have.lengthOf(1);
-        expect(users[0].username).to.equal('Bill');
-        expect(users[0].secretValue).to.equal('42');
-      });
-
-      it('updates with casting', async function () {
-        await this.User.create({ username: 'John' });
-        await this.User.update({
-          username: this.sequelize.cast('1', dialectName === 'mssql' ? 'nvarchar' : 'char'),
-        }, {
-          where: { username: 'John' },
-          safe,
-        });
-        expect((await this.User.findOne()).username).to.equal('1');
-      });
-
-      it('updates with function and column value', async function () {
-        await this.User.create({ username: 'John' });
-        await this.User.update({
-          username: this.sequelize.fn('upper', this.sequelize.col('username')),
-        }, {
-          where: { username: 'John' },
-          safe,
-        });
-        expect((await this.User.findOne()).username).to.equal('JOHN');
-      });
-
-      it('does not update virtual attributes', async function () {
-        const User = this.sequelize.define('User', {
-          username: DataTypes.STRING,
-          virtual: DataTypes.VIRTUAL,
-        });
-
-        await User.create({ username: 'jan' });
-        await User.update({
-          username: 'kurt',
-          virtual: 'test',
-        }, {
-          where: {
-            username: 'jan',
-          },
-          safe,
-        });
-        const user = await User.findOne();
-        expect(user.username).to.equal('kurt');
-        expect(user.virtual).to.not.equal('test');
-      });
-
-      it('doesn\'t update attributes that are altered by virtual setters when option is enabled', async function () {
-        const User = this.sequelize.define('UserWithVirtualSetters', {
-          username: DataTypes.STRING,
-          illness_name: DataTypes.STRING,
-          illness_pain: DataTypes.INTEGER,
-          illness: {
-            type: DataTypes.VIRTUAL,
-            set(value) {
-              this.set('illness_name', value.name);
-              this.set('illness_pain', value.pain);
+        it('allows sql logging of updated statements', async function () {
+          const User = this.sequelize.define('User', {
+            name: DataTypes.STRING,
+            bio: DataTypes.TEXT,
+          }, {
+            paranoid: true,
+          });
+          let test = false;
+          await User.sync({ force: true });
+          const u = await User.create({ name: 'meg', bio: 'none' });
+          expect(u).to.exist;
+          await u.update({ name: 'brian' }, {
+            logging(sql) {
+              test = true;
+              expect(sql).to.exist;
+              expect(sql.toUpperCase()).to.include('UPDATE');
             },
-          },
+            safe,
+          });
+          expect(test).to.be.true;
         });
 
-        await User.sync({ force: true });
-        await User.create({
-          username: 'Jan',
-          illness_name: 'Headache',
-          illness_pain: 5,
-        });
-        await User.update({
-          illness: { pain: 10, name: 'Backache' },
-        }, {
-          where: {
-            username: 'Jan',
-          },
-          sideEffects: false,
-          safe,
-        });
-        expect((await User.findOne()).illness_pain).to.be.equal(5);
-      });
-
-      it('updates attributes that are altered by virtual setters', async function () {
-        const User = this.sequelize.define('UserWithVirtualSetters', {
-          username: DataTypes.STRING,
-          illness_name: DataTypes.STRING,
-          illness_pain: DataTypes.INTEGER,
-          illness: {
-            type: DataTypes.VIRTUAL,
-            set(value) {
-              this.set('illness_name', value.name);
-              this.set('illness_pain', value.pain);
-            },
-          },
-        });
-
-        await User.sync({ force: true });
-        await User.create({
-          username: 'Jan',
-          illness_name: 'Headache',
-          illness_pain: 5,
-        });
-        await User.update({
-          illness: { pain: 10, name: 'Backache' },
-        }, {
-          where: {
-            username: 'Jan',
-          },
-          safe,
-        });
-        expect((await User.findOne()).illness_pain).to.be.equal(10);
-      });
-
-      it('should properly set data when individualHooks are true', async function () {
-        this.User.beforeUpdate(instance => {
-          instance.set('intVal', 1);
-        });
-
-        const user = await this.User.create({ username: 'Peter' });
-        await this.User.update({ data: 'test' }, {
-          where: { id: user.id },
-          individualHooks: true,
-          safe,
-        });
-        expect((await this.User.findByPk(user.id)).intVal).to.be.equal(1);
-      });
-
-      it('sets updatedAt to the current timestamp', async function () {
-        const data = [
-          { username: 'Peter', secretValue: '42' },
-          { username: 'Paul', secretValue: '42' },
-          { username: 'Bob', secretValue: '43' },
-        ];
-
-        await this.User.bulkCreate(data);
-        let users = await this.User.findAll({ order: ['id'] });
-        this.updatedAt = users[0].updatedAt;
-
-        expect(this.updatedAt).to.be.ok;
-        expect(this.updatedAt).to.equalTime(users[2].updatedAt); // All users should have the same updatedAt
-
-        // Pass the time so we can actually see a change
-        this.clock.tick(1000);
-        await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
-
-        users = await this.User.findAll({ order: ['id'] });
-        expect(users[0].username).to.equal('Bill');
-        expect(users[1].username).to.equal('Bill');
-        expect(users[2].username).to.equal('Bob');
-
-        expect(users[0].updatedAt).to.be.afterTime(this.updatedAt);
-        expect(users[2].updatedAt).to.equalTime(this.updatedAt);
-      });
-
-      it('returns the number of affected rows', async function () {
-        const data = [
-          { username: 'Peter', secretValue: '42' },
-          { username: 'Paul', secretValue: '42' },
-          { username: 'Bob', secretValue: '43' },
-        ];
-
-        await this.User.bulkCreate(data);
-        let [affectedRows] = await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
-        expect(affectedRows).to.equal(2);
-        [affectedRows] = await this.User.update({ username: 'Bill' }, { where: { secretValue: '44' }, safe });
-        expect(affectedRows).to.equal(0);
-      });
-
-      it('does not update soft deleted records when model is paranoid', async function () {
-        const ParanoidUser = this.sequelize.define('ParanoidUser', {
-          username: DataTypes.STRING,
-        }, { paranoid: true });
-
-        await this.sequelize.sync({ force: true });
-        await ParanoidUser.bulkCreate([
-          { username: 'user1' },
-          { username: 'user2' },
-        ]);
-        await ParanoidUser.destroy({
-          where: { username: 'user1' },
-        });
-        await ParanoidUser.update({ username: 'foo' }, { where: {} });
-        const users = await ParanoidUser.findAll({
-          paranoid: false,
-          where: {
-            username: 'foo',
-          },
-          safe,
-        });
-        expect(users).to.have.lengthOf(1, 'should not update soft-deleted record');
-      });
-
-      it('updates soft deleted records when paranoid is overridden', async function () {
-        const ParanoidUser = this.sequelize.define('ParanoidUser', {
-          username: DataTypes.STRING,
-        }, { paranoid: true });
-
-        await this.sequelize.sync({ force: true });
-        await ParanoidUser.bulkCreate([
-          { username: 'user1' },
-          { username: 'user2' },
-        ]);
-        await ParanoidUser.destroy({ where: { username: 'user1' } });
-        await ParanoidUser.update({ username: 'foo' }, {
-          where: {},
-          paranoid: false,
-          safe,
-        });
-        const users = await ParanoidUser.findAll({
-          paranoid: false,
-          where: {
-            username: 'foo',
-          },
-        });
-        expect(users).to.have.lengthOf(2);
-      });
-
-      it('calls update hook for soft deleted objects', async function () {
-        const hookSpy = sinon.spy();
-        const User = this.sequelize.define('User',
-          { username: DataTypes.STRING },
-          { paranoid: true, hooks: { beforeUpdate: hookSpy } });
-
-        await this.sequelize.sync({ force: true });
-        await User.bulkCreate([{ username: 'user1' }]);
-        await User.destroy({
-          where: {
-            username: 'user1',
-          },
-        });
-        await User.update({ username: 'updUser1' }, {
-          paranoid: false,
-          where: { username: 'user1' },
-          individualHooks: true,
-          safe,
-        });
-        const user = await User.findOne({ where: { username: 'updUser1' }, paranoid: false });
-        expect(user).to.not.be.null;
-        expect(user.username).to.eq('updUser1');
-        expect(hookSpy).to.have.been.called;
-      });
-
-      if (dialectName === 'postgres') {
-        it('returns the affected rows if `options.returning` is true', async function () {
+        it('updates only values that match filter', async function () {
           const data = [
             { username: 'Peter', secretValue: '42' },
             { username: 'Paul', secretValue: '42' },
@@ -1386,40 +1119,309 @@ describe(Support.getTestDialectTeaser('Model'), () => {
           ];
 
           await this.User.bulkCreate(data);
-          let [count, rows] = await this.User.update({ username: 'Bill' }, {
-            where: { secretValue: '42' },
-            returning: true,
-            safe,
-          });
-          expect(count).to.equal(2);
-          expect(rows).to.have.length(2);
-          [count, rows] = await this.User.update({ username: 'Bill' }, {
-            where: { secretValue: '44' },
-            returning: true,
-            safe,
-          });
-          expect(count).to.equal(0);
-          expect(rows).to.have.length(0);
-        });
-      }
+          await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
+          const users = await this.User.findAll({ order: ['id'] });
+          expect(users).to.have.lengthOf(3);
 
-      if (dialectName === 'mysql') {
-        it('supports limit clause', async function () {
+          for (const user of users) {
+            if (user.secretValue === '42') {
+              expect(user.username).to.equal('Bill');
+            } else {
+              expect(user.username).to.equal('Bob');
+            }
+          }
+        });
+
+        it('updates only values that match the allowed fields', async function () {
+          const data = [{ username: 'Peter', secretValue: '42' }];
+
+          await this.User.bulkCreate(data);
+          await this.User.update({ username: 'Bill', secretValue: '43' }, { where: { secretValue: '42' }, fields: ['username'], safe });
+          const users = await this.User.findAll({ order: ['id'] });
+          expect(users).to.have.lengthOf(1);
+          expect(users[0].username).to.equal('Bill');
+          expect(users[0].secretValue).to.equal('42');
+        });
+
+        it('updates with casting', async function () {
+          await this.User.create({ username: 'John' });
+          await this.User.update({
+            username: this.sequelize.cast('1', dialectName === 'mssql' ? 'nvarchar' : 'char'),
+          }, {
+            where: { username: 'John' },
+            safe,
+          });
+          expect((await this.User.findOne()).username).to.equal('1');
+        });
+
+        it('updates with function and column value', async function () {
+          await this.User.create({ username: 'John' });
+          await this.User.update({
+            username: this.sequelize.fn('upper', this.sequelize.col('username')),
+          }, {
+            where: { username: 'John' },
+            safe,
+          });
+          expect((await this.User.findOne()).username).to.equal('JOHN');
+        });
+
+        it('does not update virtual attributes', async function () {
+          const User = this.sequelize.define('User', {
+            username: DataTypes.STRING,
+            virtual: DataTypes.VIRTUAL,
+          });
+
+          await User.create({ username: 'jan' });
+          await User.update({
+            username: 'kurt',
+            virtual: 'test',
+          }, {
+            where: {
+              username: 'jan',
+            },
+            safe,
+          });
+          const user = await User.findOne();
+          expect(user.username).to.equal('kurt');
+          expect(user.virtual).to.not.equal('test');
+        });
+
+        it('doesn\'t update attributes that are altered by virtual setters when option is enabled', async function () {
+          const User = this.sequelize.define('UserWithVirtualSetters', {
+            username: DataTypes.STRING,
+            illness_name: DataTypes.STRING,
+            illness_pain: DataTypes.INTEGER,
+            illness: {
+              type: DataTypes.VIRTUAL,
+              set(value) {
+                this.set('illness_name', value.name);
+                this.set('illness_pain', value.pain);
+              },
+            },
+          });
+
+          await User.sync({ force: true });
+          await User.create({
+            username: 'Jan',
+            illness_name: 'Headache',
+            illness_pain: 5,
+          });
+          await User.update({
+            illness: { pain: 10, name: 'Backache' },
+          }, {
+            where: {
+              username: 'Jan',
+            },
+            sideEffects: false,
+            safe,
+          });
+          expect((await User.findOne()).illness_pain).to.be.equal(5);
+        });
+
+        it('updates attributes that are altered by virtual setters', async function () {
+          const User = this.sequelize.define('UserWithVirtualSetters', {
+            username: DataTypes.STRING,
+            illness_name: DataTypes.STRING,
+            illness_pain: DataTypes.INTEGER,
+            illness: {
+              type: DataTypes.VIRTUAL,
+              set(value) {
+                this.set('illness_name', value.name);
+                this.set('illness_pain', value.pain);
+              },
+            },
+          });
+
+          await User.sync({ force: true });
+          await User.create({
+            username: 'Jan',
+            illness_name: 'Headache',
+            illness_pain: 5,
+          });
+          await User.update({
+            illness: { pain: 10, name: 'Backache' },
+          }, {
+            where: {
+              username: 'Jan',
+            },
+            safe,
+          });
+          expect((await User.findOne()).illness_pain).to.be.equal(10);
+        });
+
+        it('should properly set data when individualHooks are true', async function () {
+          this.User.beforeUpdate(instance => {
+            instance.set('intVal', 1);
+          });
+
+          const user = await this.User.create({ username: 'Peter' });
+          await this.User.update({ data: 'test' }, {
+            where: { id: user.id },
+            individualHooks: true,
+            safe,
+          });
+          expect((await this.User.findByPk(user.id)).intVal).to.be.equal(1);
+        });
+
+        it('sets updatedAt to the current timestamp', async function () {
           const data = [
             { username: 'Peter', secretValue: '42' },
-            { username: 'Peter', secretValue: '42' },
-            { username: 'Peter', secretValue: '42' },
+            { username: 'Paul', secretValue: '42' },
+            { username: 'Bob', secretValue: '43' },
           ];
 
           await this.User.bulkCreate(data);
-          const [affectedRows] = await this.User.update({ secretValue: '43' }, {
-            where: { username: 'Peter' },
-            limit: 1,
+          let users = await this.User.findAll({ order: ['id'] });
+          this.updatedAt = users[0].updatedAt;
+
+          expect(this.updatedAt).to.be.ok;
+          expect(this.updatedAt).to.equalTime(users[2].updatedAt); // All users should have the same updatedAt
+
+          // Pass the time so we can actually see a change
+          this.clock.tick(1000);
+          await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
+
+          users = await this.User.findAll({ order: ['id'] });
+          expect(users[0].username).to.equal('Bill');
+          expect(users[1].username).to.equal('Bill');
+          expect(users[2].username).to.equal('Bob');
+
+          expect(users[0].updatedAt).to.be.afterTime(this.updatedAt);
+          expect(users[2].updatedAt).to.equalTime(this.updatedAt);
+        });
+
+        it('returns the number of affected rows', async function () {
+          const data = [
+            { username: 'Peter', secretValue: '42' },
+            { username: 'Paul', secretValue: '42' },
+            { username: 'Bob', secretValue: '43' },
+          ];
+
+          await this.User.bulkCreate(data);
+          let [affectedRows] = await this.User.update({ username: 'Bill' }, { where: { secretValue: '42' }, safe });
+          expect(affectedRows).to.equal(2);
+          [affectedRows] = await this.User.update({ username: 'Bill' }, { where: { secretValue: '44' }, safe });
+          expect(affectedRows).to.equal(0);
+        });
+
+        it('does not update soft deleted records when model is paranoid', async function () {
+          const ParanoidUser = this.sequelize.define('ParanoidUser', {
+            username: DataTypes.STRING,
+          }, { paranoid: true });
+
+          await this.sequelize.sync({ force: true });
+          await ParanoidUser.bulkCreate([
+            { username: 'user1' },
+            { username: 'user2' },
+          ]);
+          await ParanoidUser.destroy({
+            where: { username: 'user1' },
+          });
+          await ParanoidUser.update({ username: 'foo' }, { where: {} });
+          const users = await ParanoidUser.findAll({
+            paranoid: false,
+            where: {
+              username: 'foo',
+            },
             safe,
           });
-          expect(affectedRows).to.equal(1);
+          expect(users).to.have.lengthOf(1, 'should not update soft-deleted record');
         });
-      }
+
+        it('updates soft deleted records when paranoid is overridden', async function () {
+          const ParanoidUser = this.sequelize.define('ParanoidUser', {
+            username: DataTypes.STRING,
+          }, { paranoid: true });
+
+          await this.sequelize.sync({ force: true });
+          await ParanoidUser.bulkCreate([
+            { username: 'user1' },
+            { username: 'user2' },
+          ]);
+          await ParanoidUser.destroy({ where: { username: 'user1' } });
+          await ParanoidUser.update({ username: 'foo' }, {
+            where: {},
+            paranoid: false,
+            safe,
+          });
+          const users = await ParanoidUser.findAll({
+            paranoid: false,
+            where: {
+              username: 'foo',
+            },
+          });
+          expect(users).to.have.lengthOf(2);
+        });
+
+        it('calls update hook for soft deleted objects', async function () {
+          const hookSpy = sinon.spy();
+          const User = this.sequelize.define('User',
+            { username: DataTypes.STRING },
+            { paranoid: true, hooks: { beforeUpdate: hookSpy } });
+
+          await this.sequelize.sync({ force: true });
+          await User.bulkCreate([{ username: 'user1' }]);
+          await User.destroy({
+            where: {
+              username: 'user1',
+            },
+          });
+          await User.update({ username: 'updUser1' }, {
+            paranoid: false,
+            where: { username: 'user1' },
+            individualHooks: true,
+            safe,
+          });
+          const user = await User.findOne({ where: { username: 'updUser1' }, paranoid: false });
+          expect(user).to.not.be.null;
+          expect(user.username).to.eq('updUser1');
+          expect(hookSpy).to.have.been.called;
+        });
+
+        if (dialectName === 'postgres') {
+          it('returns the affected rows if `options.returning` is true', async function () {
+            const data = [
+              { username: 'Peter', secretValue: '42' },
+              { username: 'Paul', secretValue: '42' },
+              { username: 'Bob', secretValue: '43' },
+            ];
+
+            await this.User.bulkCreate(data);
+            let [count, rows] = await this.User.update({ username: 'Bill' }, {
+              where: { secretValue: '42' },
+              returning: true,
+              safe,
+            });
+            expect(count).to.equal(2);
+            expect(rows).to.have.length(2);
+            [count, rows] = await this.User.update({ username: 'Bill' }, {
+              where: { secretValue: '44' },
+              returning: true,
+              safe,
+            });
+            expect(count).to.equal(0);
+            expect(rows).to.have.length(0);
+          });
+        }
+
+        if (dialectName === 'mysql') {
+          it('supports limit clause', async function () {
+            const data = [
+              { username: 'Peter', secretValue: '42' },
+              { username: 'Peter', secretValue: '42' },
+              { username: 'Peter', secretValue: '42' },
+            ];
+
+            await this.User.bulkCreate(data);
+            const [affectedRows] = await this.User.update({ secretValue: '43' }, {
+              where: { username: 'Peter' },
+              limit: 1,
+              safe,
+            });
+            expect(affectedRows).to.equal(1);
+          });
+        }
+      });
     });
 
   });
