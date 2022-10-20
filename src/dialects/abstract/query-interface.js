@@ -945,6 +945,12 @@ export class QueryInterface {
 
     options.type = QueryTypes.UPDATE;
     options.instance = instance;
+    options.retry = {
+      match: [/Validation Error/i, /deadlock/i],
+      max: 5, // Maximum retry 5 times
+      backoffBase: 500, // Initial backoff duration in ms. Default: 100,
+      backoffExponent: 1.1, // Exponent to increase backoff each try. Default: 1.1
+    };
 
     delete options.replacements;
 
