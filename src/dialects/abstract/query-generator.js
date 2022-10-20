@@ -437,12 +437,14 @@ export class AbstractQueryGenerator {
 
     const values = [];
     const bind = Object.create(null);
+    const returningModelAttributes = [];
     const modelAttributeMap = {};
     let outputFragment = '';
     let tmpTable = ''; // tmpTable declaration for trigger
     let suffix = '';
 
-    if (_.get(this, ['sequelize', 'options', 'dialectOptions', 'prependSearchPath']) || options.searchPath) {
+    const isSafeQuery = Boolean(options.safe && this.dialect.supports.EXCEPTION);
+    if (isSafeQuery || _.get(this, ['sequelize', 'options', 'dialectOptions', 'prependSearchPath']) || options.searchPath) {
       // Not currently supported with search path (requires output of multiple queries)
       options.bindParam = false;
     }
@@ -455,6 +457,7 @@ export class AbstractQueryGenerator {
 
     if (this.dialect.supports.returnValues && options.returning) {
       const returnValues = this.generateReturnValues(columnDefinitions, options);
+      returningModelAttributes.push(...returnValues.returnFields);
 
       suffix += returnValues.returningFragment;
       tmpTable = returnValues.tmpTable || '';
@@ -498,7 +501,19 @@ export class AbstractQueryGenerator {
       return { query: '' };
     }
 
-    const query = `${tmpTable}UPDATE ${this.quoteTable(tableName)} SET ${values.join(',')}${outputFragment} ${this.whereQuery(where, whereOptions)}${suffix}`.trim();
+    const dropFunction = 'DROP FUNCTION IF EXISTS pg_temp.update_safe_func()';
+    if (returningModelAttributes.length === 0) {
+      returningModelAttributes.push('*');
+    }
+
+    let query = `${tmpTable}UPDATE ${this.quoteTable(tableName)} SET ${values.join(',')}${outputFragment} ${this.whereQuery(where, whereOptions)}${suffix}`.trim();
+    if (isSafeQuery) {
+      const quotedTable = this.quoteTable(tableName);
+      const delimiter = `$func_${crypto.randomUUID().replace(/-/g, '')}$`;
+      const selectQuery = `SELECT (update_safe_func.response).${returningModelAttributes.join(', (update_safe_func.response).')}, update_safe_func.sequelize_caught_exception FROM pg_temp.update_safe_func();`;
+      const caughtExceptionQuery = 'WHEN deadlock_detected THEN GET STACKED DIAGNOSTICS sequelize_caught_exception = PG_EXCEPTION_DETAIL';
+      query = `CREATE OR REPLACE FUNCTION pg_temp.update_safe_func(OUT response ${quotedTable}, OUT sequelize_caught_exception text) RETURNS RECORD AS ${delimiter} BEGIN ${query} RETURNING * INTO response; EXCEPTION ${caughtExceptionQuery}; END ${delimiter} LANGUAGE plpgsql; ${selectQuery} ${dropFunction};`;
+    }
 
     // Used by Postgres upsertQuery and calls to here with options.exception set to true
     const result = { query };
